@@ -1,0 +1,13 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+- Use meaningful variable and function names.
+- Prefer `const` and `let` over `var` in JavaScript.
+- Use consistent indentation (e.g., 2 spaces or 4 spaces). For this project, let's aim for 2 spaces.
+- Add comments to explain complex logic or non-obvious code sections.
+- Keep functions focused on a single task.
+- Ensure HTML is well-structured and semantic.
+- CSS classes should be descriptive and follow a consistent naming convention (e.g., BEM or a simpler hyphenated style).
+- Avoid overly long lines of code.

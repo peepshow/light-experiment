@@ -1,0 +1,16 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+- When creating geometries, prefer `BufferGeometry` for performance, especially for dynamic or large numbers of objects.
+- Dispose of Three.js objects (geometries, materials, textures) when they are no longer needed to free up GPU memory. Use `geometry.dispose()`, `material.dispose()`, `texture.dispose()`.
+- Keep the animation loop (`requestAnimationFrame`) lean. Offload heavy computations if possible.
+- Use `Vector3`, `Quaternion`, and `Matrix4` for transformations and calculations. Avoid manual matrix manipulation unless necessary.
+- When using shaders, ensure uniforms are updated efficiently.
+- Use `console.time()` and `console.timeEnd()` for benchmarking specific parts of your code.
+- Comment complex Three.js specific logic and shader code.
+- Use `OrbitControls` for development and debugging, but consider removing or providing an alternative for the final user experience if it's not needed.
+- Ensure `PerspectiveCamera` has appropriate `near` and `far` planes for the scene's scale.
+- Use `THREE.AdditiveBlending` for light effects to make them accumulate realistically.
+- For post-processing, use the `EffectComposer` and selectively apply passes.
