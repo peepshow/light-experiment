@@ -35,6 +35,8 @@ const params = {
   paletteColor4Enabled: true,
   paletteColor5: '#007bff',
   paletteColor5Enabled: true,
+  backgroundColor: '#000000',
+  lightModeEnabled: false, // New toggle for light/dark mode behavior
 };
 
 const particles = [];
@@ -52,8 +54,18 @@ const particleVertexShader = `
 const particleFragmentShader = `
   varying float vTrailAlphaMultiplier;
   uniform vec3 color;
+  uniform float uLightMode; // 0.0 for dark mode, 1.0 for light mode
+
   void main() {
-    gl_FragColor = vec4(color, vTrailAlphaMultiplier * 0.8); // Slightly increased base opacity for bloom
+    float alpha = vTrailAlphaMultiplier * 0.8;
+    if (uLightMode > 0.5) { // If in light mode
+      // Make particles a bit more solid/less transparent, especially the tail
+      alpha = mix(vTrailAlphaMultiplier * 0.5, 1.0, vTrailAlphaMultiplier * vTrailAlphaMultiplier);
+      alpha = max(alpha, 0.1); // Ensure a minimum visibility
+      gl_FragColor = vec4(color * 0.9, alpha); // Slightly darken color, adjust alpha for light bg
+    } else {
+      gl_FragColor = vec4(color, alpha); // Original dark mode rendering
+    }
   }
 `;
 
@@ -102,6 +114,34 @@ function updateAllParticleColors() {
     particles.forEach(p => setParticleColor(p));
 }
 
+function updateAllParticleMaterialProperties() {
+    console.log(`Updating all particle materials. Light Mode Enabled: ${params.lightModeEnabled}`); // DEBUG
+    particles.forEach(p => {
+        if (params.lightModeEnabled) { // Light Mode ON
+            console.log('Setting to Light Mode for particle'); // DEBUG
+            p.material.blending = THREE.NormalBlending;
+            p.material.depthWrite = true;
+            if (p.material.uniforms.uLightMode) {
+                p.material.uniforms.uLightMode.value = 1.0;
+                console.log(`Particle uLightMode set to: ${p.material.uniforms.uLightMode.value}`); // DEBUG
+            } else {
+                console.error('uLightMode uniform not found on particle material!'); // DEBUG
+            }
+        } else { // Light Mode OFF (Dark Mode)
+            console.log('Setting to Dark Mode for particle'); // DEBUG
+            p.material.blending = THREE.AdditiveBlending;
+            p.material.depthWrite = false;
+            if (p.material.uniforms.uLightMode) {
+                p.material.uniforms.uLightMode.value = 0.0;
+                console.log(`Particle uLightMode set to: ${p.material.uniforms.uLightMode.value}`); // DEBUG
+            } else {
+                console.error('uLightMode uniform not found on particle material!'); // DEBUG
+            }
+        }
+        p.material.needsUpdate = true; // Force material update, just in case
+    });
+}
+
 class Particle {
   constructor(path) {
     this.path = path;
@@ -127,22 +167,29 @@ class Particle {
       const posOnCurve = this.path.getPointAt(t);
       const scatteredPos = posOnCurve.clone().add(this.scatterOffset);
       scatteredPos.toArray(this.trailPositions, i * 3);
-      this.trailAlphas[i] = 1.0 - (i / this.trailLength); 
+      this.trailAlphas[i] = 1.0 - (i / Math.max(1, this.trailLength - 1));
     }
+    if(this.trailLength > 0) this.trailAlphas[0] = 1.0;
 
     this.geometry = new THREE.BufferGeometry();
     this.geometry.setAttribute('position', new THREE.BufferAttribute(this.trailPositions, 3));
     this.geometry.setAttribute('trailAlphaMultiplier', new THREE.BufferAttribute(this.trailAlphas, 1));
 
+    let initialBlending = params.lightModeEnabled ? THREE.NormalBlending : THREE.AdditiveBlending;
+    let initialDepthWrite = params.lightModeEnabled ? true : false;
+    let initialULightMode = params.lightModeEnabled ? 1.0 : 0.0;
+    console.log(`Particle constructor: initialULightMode = ${initialULightMode}`); // DEBUG
+
     this.material = new THREE.ShaderMaterial({
       uniforms: {
-        color: { value: new THREE.Color() } // Initial color will be set by setParticleColor
+        color: { value: new THREE.Color() },
+        uLightMode: { value: initialULightMode } 
       },
       vertexShader: particleVertexShader,
       fragmentShader: particleFragmentShader,
       transparent: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false 
+      blending: initialBlending,
+      depthWrite: initialDepthWrite 
     });
     setParticleColor(this); // Set initial color based on mode
 
@@ -251,7 +298,19 @@ function updateColorControllerVisibility() {
 }
 
 function initGUI() {
+  // alert("initGUI called"); // DEBUG ALERT - REMOVED
   gui = new GUI();
+  
+  const sceneFolder = gui.addFolder('Scene');
+  // alert("Scene folder created"); // DEBUG ALERT - REMOVED
+  sceneFolder.addColor(params, 'backgroundColor').name('Background').onChange(v => {
+      if (renderer) { 
+        renderer.setClearColor(v);
+      }
+  });
+  sceneFolder.add(params, 'lightModeEnabled').name('Light Mode').onChange(updateAllParticleMaterialProperties);
+  // sceneFolder.open(); // REMOVED - Open by default for debugging
+
   const particlesFolder = gui.addFolder('Particles');
   particlesFolder.add(params, 'numParticles', 10, 500, 1).name('Count').onChange(recreateSystem);
   particlesFolder.add(params, 'particleTrailLength', 1, 50, 1).name('Trail Length').onChange(recreateSystem);
@@ -270,15 +329,12 @@ function initGUI() {
       paletteControllers[`color${i}`] = colorFolder.addColor(params, `paletteColor${i}`).name(`Palette ${i}`).onChange(updateAllParticleColors);
       paletteControllers[`enabled${i}`] = colorFolder.add(params, `paletteColor${i}Enabled`).name(`Enabled ${i}`).onChange(updateAllParticleColors);
   }
-  updateColorControllerVisibility(); // Set initial visibility
+  updateColorControllerVisibility(); 
 
   const bloomFolder = gui.addFolder('Bloom');
   bloomFolder.add(params, 'bloomStrength', 0, 3, 0.01).name('Strength').onChange(v => bloomPass.strength = v);
   bloomFolder.add(params, 'bloomRadius', 0, 1, 0.01).name('Radius').onChange(v => bloomPass.radius = v);
   bloomFolder.add(params, 'bloomThreshold', 0, 1, 0.01).name('Threshold').onChange(v => bloomPass.threshold = v);
-
-  // particlesFolder.open();
-  // bloomFolder.open();
 }
 
 function init() {
@@ -292,7 +348,7 @@ function init() {
   renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(window.devicePixelRatio);
-  renderer.setClearColor(0x000000); 
+  renderer.setClearColor(params.backgroundColor); 
 
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
@@ -327,7 +383,7 @@ function init() {
   initGUI(); // Initialize GUI controls
 
   window.addEventListener('resize', onWindowResize, false);
-  console.log("Three.js scene initialized with 5-color palette GUI controls.");
+  console.log("Three.js scene initialized with Light Mode toggle."); // Updated log message
 }
 
 function onWindowResize() {

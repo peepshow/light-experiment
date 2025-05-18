@@ -33,15 +33,19 @@ Inspired by examples like [santosharron/infinite-lights](https://github.com/sant
     *   [x] Manage particle lifecycle: recycle particles (reinitialize at the start of the path with new color/scatter).
 
 5.  **Polishing the Aesthetics** - **COMPLETED**
-    *   [x] Refine color palette for lights (randomized HSL).
+    *   [x] Refine color palette for lights (randomized HSL, user-defined single, and user-defined 5-color palette with enables).
     *   [x] Implement post-processing for enhanced glow:
         *   [x] Use `EffectComposer`.
         *   [x] Add `UnrealBloomPass`.
         *   [ ] (Optional) Experiment with `AfterimagePass`.
+    *   [x] Added background color control.
 
-6.  **Interactive Controls (Optional Enhancement)**
-    *   [ ] Integrate a GUI library (e.g., `lil-gui`).
-    *   [ ] Add controls for: number of particles, speed, trail length, scattering, colors, bloom parameters.
+6.  **Interactive Controls (Optional Enhancement)** - **COMPLETED**
+    *   [x] Integrate a GUI library (`lil-gui`).
+    *   [x] Add controls for: number of particles, speed, trail length, scattering, Viviani curve scale.
+    *   [x] Add controls for: bloom parameters (strength, radius, threshold).
+    *   [x] Add controls for: color modes (rainbow, single, 5-color palette with enables).
+    *   [x] Add control for: scene background color.
 
 ## Development Notes
 
