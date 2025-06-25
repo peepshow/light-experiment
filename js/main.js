@@ -20,17 +20,17 @@ const params = {
   particleType: 'glow', // 'glow', 'weldingSpark', or 'comet'
   curveType: 'lorenz', // 'viviani', 'lorenz', or 'juggling'
   // Common params for all particle types
-  numParticles: 406,
-  particleScatterRadius: 1.1,
-  vivianiA: 5,
+  numParticles: 500,
+  particleScatterRadius: 0.4,
+  vivianiA: 15,
   // Lorenz Attractor params
   lorenz: {
-    sigma: 9.5,
-    rho: 26.2, 
-    beta: 2.5,
-    scale: 1.0,
+    sigma: 5,
+    rho: 20.9, 
+    beta: 2.7,
+    scale: 1.1,
     timeStep: 0.012,
-    numPoints: 1600,
+    numPoints: 2600,
   },
   // Juggling Pattern params (3-ball cascade)
   juggling: {
@@ -49,7 +49,7 @@ const params = {
     fadeInTime: 0.09,     // How quickly particles fade in (0-1)
     stableTime: 0.9,     // How long particles stay visible (0-1)
     fadeOutTime: 0.2,    // How quickly particles fade out (0-1)
-    randomOffset: 1.0,   // Random offset for lifecycle start (0-1)
+    randomOffset: 0,   // Random offset for lifecycle start (0-1)
   },
   // Theme & Background Params
   currentTheme: 'dark', // 'dark' or 'light'
@@ -59,27 +59,27 @@ const params = {
   glow: {
     trailLength: 22,
     speedFactor: 0.0007,
-    boldness: 1.0,
-    lineWidth: 2.0, // Controls the thickness of the glow lines
+    boldness: 1,
+    lineWidth: 2, // Controls the thickness of the glow lines
   },
   // Welding spark specific params
   weldingSpark: {
-    trailLength: 16,
-    speedFactor: 0.006,
-    sparkSize: 0.5,
-    sparkHeat: 0.8, // Controls the "temperature" effect
-    pathFollowing: 0.7, // Controls how closely sparks follow the curve (0-1)
+    trailLength: 50,
+    speedFactor: 0.0001,
+    sparkSize: 1.2,
+    sparkHeat: 1, // Controls the "temperature" effect
+    pathFollowing: 0.8, // Controls how closely sparks follow the curve (0-1)
   },
   // Comet particle specific params
   comet: {
-    headSize: 1.0, // Size of the comet head
+    headSize: 1, // Size of the comet head
     tailLength: 20, // Length of the comet tail
     tailWidth: 0.8, // Width/thickness of the tail
     tailFade: 0.8, // How quickly the tail fades (lower = faster fade)
-    glowIntensity: 0.8, // Brightness of the glow
-    speedFactor: 0.005, // Speed of comets
+    glowIntensity: 0.45, // Brightness of the glow
+    speedFactor: 0.0004, // Speed of comets
     colorMode: 'single', // 'rainbow', 'single', 'palette'
-    cometColor: '#80ffff', // Default cyan-blue color for comets
+    cometColor: '#0054db', // Default cyan-blue color for comets
   },
   // Color Params (currently used by glow particles)
   colorMode: 'palette',
@@ -237,7 +237,7 @@ class GlowParticleSystem extends ParticleSystem {
       p.update();
       
       // Apply lifecycle alpha, with special handling for open curves
-      if (params.lifecycle.enabled && p.material.uniforms.uLifecycleAlpha) {
+      if (params.lifecycle.enabled) {
         let finalAlpha = this.calculateLifecycleAlpha(p);
 
         // For open curves, add fade-out/fade-in to hide the jump
@@ -824,24 +824,53 @@ class CometParticleSystem extends ParticleSystem {
 
   update() {
     this.particles.forEach(p => {
-      // Update particle motion
+      // Update particle motion (which may set the justReset flag)
       p.update();
       
-      // Apply lifecycle alpha to both head and tail
+      // Apply lifecycle alpha, with special handling for open curves
       if (params.lifecycle.enabled) {
-        const lifecycleAlpha = this.calculateLifecycleAlpha(p);
-        if (p.headMaterial.uniforms.lifecycleAlpha) {
-          p.headMaterial.uniforms.lifecycleAlpha.value = lifecycleAlpha;
+        let finalAlpha = this.calculateLifecycleAlpha(p);
+
+        // For open curves, add fade-out/fade-in to hide the jump
+        if (!p.path.closed) {
+          const fadeOutTime = params.lifecycle.fadeOutTime;
+          const fadeInTime = params.lifecycle.fadeInTime;
+          const fadeOutStartT = 1.0 - fadeOutTime; // Start fading out in the last portion
+          
+          if (p.currentT > fadeOutStartT) {
+            // Fading out as it approaches the end
+            const fadeOutProgress = (p.currentT - fadeOutStartT) / fadeOutTime;
+            finalAlpha *= (1.0 - fadeOutProgress);
+
+          } else if (p.justReset && p.currentT < fadeInTime) {
+            // Fading in after a reset
+            const fadeInProgress = p.currentT / fadeInTime;
+            finalAlpha *= fadeInProgress;
+            
+            // If fade-in is complete, turn off the reset flag
+            if (fadeInProgress >= 1.0) {
+              p.justReset = false;
+            }
+          } else if (p.justReset) {
+            // It has been reset, but we are past the fade-in time
+            p.justReset = false;
+          }
         }
+        
+        // Apply the final alpha to head material
+        if (p.headMaterial.uniforms.lifecycleAlpha) {
+          p.headMaterial.uniforms.lifecycleAlpha.value = finalAlpha;
+        }
+        // Apply the final alpha to tail material
         if (p.tailMaterial.uniforms.lifecycleAlpha) {
-          p.tailMaterial.uniforms.lifecycleAlpha.value = lifecycleAlpha;
+          p.tailMaterial.uniforms.lifecycleAlpha.value = finalAlpha;
         }
         
         // Also apply to all wide tail meshes if they exist
         if (p.wideTailMeshes) {
           p.wideTailMeshes.forEach(mesh => {
             if (mesh.material.uniforms.lifecycleAlpha) {
-              mesh.material.uniforms.lifecycleAlpha.value = lifecycleAlpha;
+              mesh.material.uniforms.lifecycleAlpha.value = finalAlpha;
             }
           });
         }
@@ -974,6 +1003,9 @@ class Comet {
     // Add lifecycle offset (random starting point in lifecycle)
     this.lifecycleOffset = Math.random() * params.lifecycle.randomOffset;
     
+    // Track reset state to handle open curves gracefully
+    this.justReset = false;
+    
     // Scatter offset for the comet's path
     this.scatterOffset = new THREE.Vector3(
       (Math.random() - 0.5) * 2 * options.scatterRadius,
@@ -1095,6 +1127,11 @@ class Comet {
         (Math.random() - 0.5) * 2 * params.particleScatterRadius,
         (Math.random() - 0.5) * 2 * params.particleScatterRadius
       );
+      
+      // For open curves, flag that a reset just happened to handle fading
+      if (!this.path.closed) {
+        this.justReset = true;
+      }
     }
     
     // Update head position
@@ -1245,24 +1282,17 @@ function updateColorControllerVisibility() {
   // Safety check: ensure GUI is initialized
   if (!gui) return;
   
-  // Only show color controls for glow particles
+  // Only show color controls for glow particles (now handled by updateParticleParametersVisibility)
   const showColorControls = params.particleType === 'glow';
   
-  // Header visibility first
-  const colorFolder = gui.folders.find(f => f.title === 'Color (Dark Theme)');
-  if (colorFolder) {
-    // Hide entire color folder if not glow
-    colorFolder.domElement.style.display = showColorControls ? '' : 'none';
-    
-    // Within the color folder, handle singleColor/palette controllers
-    if (showColorControls) {
-      singleColorController.domElement.style.display = params.colorMode === 'single' ? '' : 'none';
-      for (let i = 1; i <= 5; i++) {
-        if (paletteControllers[`color${i}`] && paletteControllers[`enabled${i}`]) {
-          const display = params.colorMode === 'palette' ? '' : 'none';
-          paletteControllers[`color${i}`].domElement.style.display = display;
-          paletteControllers[`enabled${i}`].domElement.style.display = display;
-        }
+  // Color controls are now managed by the parent particle options visibility
+  if (showColorControls && singleColorController) {
+    singleColorController.domElement.style.display = params.colorMode === 'single' ? '' : 'none';
+    for (let i = 1; i <= 5; i++) {
+      if (paletteControllers[`color${i}`] && paletteControllers[`enabled${i}`]) {
+        const display = params.colorMode === 'palette' ? '' : 'none';
+        paletteControllers[`color${i}`].domElement.style.display = display;
+        paletteControllers[`enabled${i}`].domElement.style.display = display;
       }
     }
   }
@@ -1312,6 +1342,15 @@ function recreateSystem() {
     const visualCenterY = (params.lorenz.rho - 1) * params.lorenz.scale;
     curveCenter = new THREE.Vector3(0, visualCenterY, 0);
     isCurveClosed = false; // Lorenz attractor is not a closed loop
+    
+    // Set optimal camera position for Lorenz attractor butterfly view
+    // Rotate clockwise around z-axis to match desired diagonal orientation
+    const angle = -18 * Math.PI / 180; // Convert to radians, negative for clockwise
+    const x = -35;
+    const y = 25;
+    const rotatedX = x * Math.cos(angle) - y * Math.sin(angle);
+    const rotatedY = x * Math.sin(angle) + y * Math.cos(angle);
+    camera.position.set(rotatedX, rotatedY, 40);
   } else if (params.curveType === 'juggling') {
     curvePoints = createJugglingPatternPoints(
       params.juggling.balls,
@@ -1326,11 +1365,17 @@ function recreateSystem() {
     // Center the camera on the juggling pattern (slightly above center)
     curveCenter = new THREE.Vector3(0, params.juggling.throwHeight * 0.4, 0);
     isCurveClosed = true; // Juggling pattern is a closed loop
+    
+    // Set optimal camera position for juggling pattern figure-8 view
+    camera.position.set(0, 0, 30);
   } else {
     // Default to Viviani curve
     curvePoints = createVivianiCurvePoints(params.vivianiA, 256);
     curveCenter = new THREE.Vector3(params.vivianiA, 0, 0);
     isCurveClosed = true; // Viviani curve should be a closed loop
+    
+    // Set optimal camera position for Viviani curve figure-8 view
+    camera.position.set(90, 0, 1);
   }
   
   curvePath = new THREE.CatmullRomCurve3(curvePoints, isCurveClosed);
@@ -1357,68 +1402,56 @@ function updateGUIVisibility() {
   // Safety check: ensure GUI is initialized
   if (!gui) return;
   
-  // Update color controls visibility
+  // Update color controls visibility (now only for glow particles)
   updateColorControllerVisibility();
-  
-  // Update curve parameters visibility  
-  if (typeof updateCurveParametersVisibility === 'function') {
-    updateCurveParametersVisibility();
-  }
-  
-  // Update particle-type specific folders
-  const glowFolder = gui.folders.find(f => f.title === 'Glow Particles');
-  const sparkFolder = gui.folders.find(f => f.title === 'Welding Spark Particles');
-  const cometFolder = gui.folders.find(f => f.title === 'Comet Particles');
-  
-  if (glowFolder) {
-    glowFolder.domElement.style.display = params.particleType === 'glow' ? '' : 'none';
-  }
-  
-  if (sparkFolder) {
-    sparkFolder.domElement.style.display = params.particleType === 'weldingSpark' ? '' : 'none';
-  }
-  
-  if (cometFolder) {
-    cometFolder.domElement.style.display = params.particleType === 'comet' ? '' : 'none';
-  }
 }
 
 function initGUI() {
   gui = new GUI();
   
-  // Theme and Background (top level)
+  // Main controls section
+  gui.add(params, 'numParticles', 10, 500, 1).name('Count').onChange(recreateSystem);
+  gui.add(params, 'particleScatterRadius', 0, 5, 0.1).name('Scatter Radius').onChange(recreateSystem);
+  
+  // Theme and rendering section
   gui.add(params, 'currentTheme', ['dark', 'light']).name('Theme').onChange(applyThemeSettings);
   gui.addColor(params, 'backgroundColor').name('Background').onChange(value => {
     // Update CSS background color
     document.body.style.backgroundColor = value;
     applyThemeSettings();
   });
-
-  gui.add(params, 'useDirectRendering').name('Direct Rendering').onChange(() => {
+  
+  // Bloom settings
+  const bloomFolder = gui.addFolder('Bloom Settings');
+  bloomFolder.close(); // Collapse by default
+  bloomFolder.add(params, 'bloomStrength', 0, 3, 0.01).name('Strength').onChange(v => {
+    params.darkBloomStrength = v;
+    if(params.currentTheme === 'dark') bloomPass.strength = v;
+  });
+  bloomFolder.add(params, 'bloomRadius', 0, 1, 0.01).name('Radius').onChange(v => {
+    params.darkBloomRadius = v;
+    if(params.currentTheme === 'dark') bloomPass.radius = v;
+  });
+  bloomFolder.add(params, 'bloomThreshold', 0, 1, 0.01).name('Threshold').onChange(v => {
+    params.darkBloomThreshold = v;
+    if(params.currentTheme === 'dark') bloomPass.threshold = v;
+  });
+  bloomFolder.add(params, 'useDirectRendering').name('Direct Rendering').onChange(() => {
     // No action needed, animate() will use the new setting immediately
   });
-
-  // Particle Type selector (top level)
-  gui.add(params, 'particleType', ['glow', 'weldingSpark', 'comet']).name('Particle Type').onChange(() => {
-    recreateSystem();
-  });
-
-  // Common particle parameters
-  const commonFolder = gui.addFolder('Common Parameters');
-  commonFolder.add(params, 'numParticles', 10, 500, 1).name('Count').onChange(recreateSystem);
-  commonFolder.add(params, 'particleScatterRadius', 0, 5, 0.1).name('Scatter Radius').onChange(recreateSystem);
   
-  // Curve type selector
-  commonFolder.add(params, 'curveType', ['viviani', 'lorenz', 'juggling']).name('Curve Type').onChange(() => {
+  // Curve Options container
+  const curveOptionsFolder = gui.addFolder('Curve Options');
+  curveOptionsFolder.add(params, 'curveType', ['viviani', 'lorenz', 'juggling']).name('Curve Type').onChange(() => {
     recreateSystem();
     updateCurveParametersVisibility();
   });
   
   // Viviani curve parameters
-  const vivianiController = commonFolder.add(params, 'vivianiA', 1, 10, 0.1).name('Curve Scale (a)').onChange(recreateSystem);
+  const vivianiController = curveOptionsFolder.add(params, 'vivianiA', 1, 10, 0.1).name('Curve Scale (a)').onChange(recreateSystem);
   
   // Lorenz Attractor parameters
-  const lorenzFolder = commonFolder.addFolder('Lorenz Attractor');
+  const lorenzFolder = curveOptionsFolder.addFolder('Lorenz Attractor');
   const sigmaController = lorenzFolder.add(params.lorenz, 'sigma', 5, 15, 0.1).name('Sigma (σ)').onChange(recreateSystem);
   const rhoController = lorenzFolder.add(params.lorenz, 'rho', 20, 35, 0.1).name('Rho (ρ)').onChange(recreateSystem);
   const betaController = lorenzFolder.add(params.lorenz, 'beta', 1, 4, 0.1).name('Beta (β)').onChange(recreateSystem);
@@ -1427,7 +1460,7 @@ function initGUI() {
   const numPointsController = lorenzFolder.add(params.lorenz, 'numPoints', 1000, 5000, 100).name('Points').onChange(recreateSystem);
   
   // Juggling Pattern parameters
-  const jugglingFolder = commonFolder.addFolder('Juggling Pattern');
+  const jugglingFolder = curveOptionsFolder.addFolder('Juggling Pattern');
   const ballsController = jugglingFolder.add(params.juggling, 'balls', 3, 7, 1).name('Number of Balls').onChange(recreateSystem);
   const throwHeightController = jugglingFolder.add(params.juggling, 'throwHeight', 3, 15, 0.1).name('Throw Height').onChange(recreateSystem);
   const handSeparationController = jugglingFolder.add(params.juggling, 'handSeparation', 2, 12, 0.1).name('Hand Separation').onChange(recreateSystem);
@@ -1455,8 +1488,16 @@ function initGUI() {
   // Set initial visibility
   updateCurveParametersVisibility();
 
-  // Lifecycle settings
-  const lifecycleFolder = gui.addFolder('Lifecycle Settings');
+  // Particle Options container
+  const particleOptionsFolder = gui.addFolder('Particle Options');
+  particleOptionsFolder.add(params, 'particleType', ['glow', 'weldingSpark', 'comet']).name('Particle Type').onChange(() => {
+    recreateSystem();
+    updateParticleParametersVisibility();
+  });
+
+  // Lifecycle settings (common to all particle types)
+  const lifecycleFolder = particleOptionsFolder.addFolder('Lifecycle Settings');
+  lifecycleFolder.close(); // Collapse by default
   lifecycleFolder.add(params.lifecycle, 'enabled').name('Enable Lifecycle');
   lifecycleFolder.add(params.lifecycle, 'fadeInTime', 0.01, 0.5, 0.01).name('Fade In Time');
   lifecycleFolder.add(params.lifecycle, 'stableTime', 0.1, 0.9, 0.01).name('Stable Time');
@@ -1464,7 +1505,7 @@ function initGUI() {
   lifecycleFolder.add(params.lifecycle, 'randomOffset', 0, 1, 0.05).name('Random Offset').onChange(recreateSystem);
   
   // Glow particle specific parameters
-  const glowFolder = gui.addFolder('Glow Particles');
+  const glowFolder = particleOptionsFolder.addFolder('Glow Particles');
   glowFolder.add(params.glow, 'trailLength', 1, 50, 1).name('Trail Length').onChange(recreateSystem);
   glowFolder.add(params.glow, 'speedFactor', 0.0001, 0.01, 0.0001).name('Speed Factor');
   glowFolder.add(params.glow, 'boldness', 0.1, 3.0, 0.1).name('Boldness').onChange(() => {
@@ -1478,8 +1519,8 @@ function initGUI() {
     }
   });
   
-  // Welding Spark specific parameters (placeholder for next phase)
-  const sparkFolder = gui.addFolder('Welding Spark Particles');
+  // Welding Spark specific parameters
+  const sparkFolder = particleOptionsFolder.addFolder('Welding Spark Particles');
   sparkFolder.add(params.weldingSpark, 'trailLength', 1, 50, 1).name('Trail Length').onChange(recreateSystem);
   sparkFolder.add(params.weldingSpark, 'speedFactor', 0.0001, 0.01, 0.0001).name('Speed Factor');
   sparkFolder.add(params.weldingSpark, 'sparkSize', 0.1, 2.0, 0.1).name('Spark Size').onChange(recreateSystem);
@@ -1491,7 +1532,7 @@ function initGUI() {
   sparkFolder.add(params.weldingSpark, 'pathFollowing', 0, 1, 0.1).name('Path Following');
   
   // Comet specific parameters
-  const cometFolder = gui.addFolder('Comet Particles');
+  const cometFolder = particleOptionsFolder.addFolder('Comet Particles');
   cometFolder.add(params.comet, 'headSize', 0.1, 3.0, 0.1).name('Head Size').onChange(() => {
     if (particleSystem && particleSystem.type === 'comet') {
       particleSystem.updateCometParams();
@@ -1526,7 +1567,8 @@ function initGUI() {
   });
 
   // Color settings (for glow particles)
-  const colorFolder = gui.addFolder('Color (Dark Theme)');
+  const colorFolder = particleOptionsFolder.addFolder('Color (Dark Theme)');
+  colorFolder.close(); // Collapse by default
   colorFolder.add(params, 'colorMode', ['rainbow', 'single', 'palette']).name('Mode').onChange(() => {
     if (particleSystem && particleSystem.type === 'glow') {
       particleSystem.updateColors();
@@ -1552,21 +1594,24 @@ function initGUI() {
       }
     });
   }
-
-  // Bloom settings (mainly for dark theme)
-  const bloomFolder = gui.addFolder('Bloom (Dark Theme)');
-  bloomFolder.add(params, 'bloomStrength', 0, 3, 0.01).name('Strength').onChange(v => {
-    params.darkBloomStrength = v;
-    if(params.currentTheme === 'dark') bloomPass.strength = v;
-  });
-  bloomFolder.add(params, 'bloomRadius', 0, 1, 0.01).name('Radius').onChange(v => {
-    params.darkBloomRadius = v;
-    if(params.currentTheme === 'dark') bloomPass.radius = v;
-  });
-  bloomFolder.add(params, 'bloomThreshold', 0, 1, 0.01).name('Threshold').onChange(v => {
-    params.darkBloomThreshold = v;
-    if(params.currentTheme === 'dark') bloomPass.threshold = v;
-  });
+  
+  // Function to update particle parameter visibility
+  function updateParticleParametersVisibility() {
+    const isGlow = params.particleType === 'glow';
+    const isSpark = params.particleType === 'weldingSpark';
+    const isComet = params.particleType === 'comet';
+    
+    // Show/hide particle-specific folders
+    glowFolder.domElement.style.display = isGlow ? '' : 'none';
+    sparkFolder.domElement.style.display = isSpark ? '' : 'none';
+    cometFolder.domElement.style.display = isComet ? '' : 'none';
+    
+    // Color folder is only for glow particles
+    colorFolder.domElement.style.display = isGlow ? '' : 'none';
+  }
+  
+  // Set initial particle visibility
+  updateParticleParametersVisibility();
   
   // Set initial visibility state
   updateGUIVisibility();
